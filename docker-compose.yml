@@ -24,7 +24,10 @@ services:
       - traefik.http.services.hero-mcp.loadbalancer.server.port=8000
       - traefik.http.routers.hero-mcp.tls.certresolver=mydnschallenge
       - traefik.http.routers.hero-mcp.tls=true
-      - traefik.http.routers.hero-mcp.middlewares=middlewares-rate-limit@file,middlewares-secure-headers@file,middlewares-authelia@file
+      # Kein middlewares-authelia@file hier! Authelia-Forward-Auth ist für
+      # Browser-Sessions (Cookies) – Claude.ai schickt Bearer Token.
+      # JWT-Validierung läuft direkt im Server via OIDC Introspection.
+      - traefik.http.routers.hero-mcp.middlewares=middlewares-rate-limit@file,middlewares-secure-headers@file
     networks:
       - traefik  # Authelia & Traefik sind beide in diesem Netzwerk
 
