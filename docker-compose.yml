@@ -10,6 +10,9 @@ services:
       - MCP_TRANSPORT=sse
       - MCP_API_KEY=${MCP_API_KEY}
       - PORT=8000
+      - OIDC_INTROSPECTION_URL=http://authelia:9091/api/oidc/introspection
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
     expose:
       - "8000"
     labels:
@@ -23,7 +26,10 @@ services:
       - traefik.http.routers.hero-mcp.middlewares=middlewares-rate-limit@file,middlewares-secure-headers@file
     networks:
       - traefik
+      - authelia
 
 networks:
   traefik:
+    external: true
+  authelia:
     external: true

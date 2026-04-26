@@ -383,13 +383,19 @@ def _run_sse() -> None:
     from starlette.responses import Response
     from starlette.routing import Mount, Route
 
+    import httpx as _httpx
+
     mcp_api_key = os.getenv("MCP_API_KEY", "")
+    oidc_introspection_url = os.getenv("OIDC_INTROSPECTION_URL", "")
+    oidc_client_id = os.getenv("OIDC_CLIENT_ID", "")
+    oidc_client_secret = os.getenv("OIDC_CLIENT_SECRET", "")
 
     # Token im Pfad: /sse            → kein Token konfiguriert (lokal/test)
     # Token im Pfad: /{token}/sse    → Claude.ai trägt die volle URL ein
-    # Bearer Header                  → Claude Desktop / API-Clients
+    # Bearer {MCP_API_KEY}           → Claude Desktop / API-Clients
+    # Bearer {JWT}                   → Claude.ai via Authelia OAuth (JWT-Introspection)
 
-    def _is_authorized(request: Request, path_token: str | None = None) -> bool:
+    async def _is_authorized(request: Request, path_token: str | None = None) -> bool:
         if not mcp_api_key:
             return True
         if path_token and path_token == mcp_api_key:
@@ -397,13 +403,27 @@ def _run_sse() -> None:
         auth = request.headers.get("Authorization", "")
         if auth == f"Bearer {mcp_api_key}":
             return True
+        # JWT via Authelia OIDC Introspection validieren
+        if auth.startswith("Bearer ") and oidc_introspection_url and oidc_client_id and oidc_client_secret:
+            jwt_token = auth[7:]
+            try:
+                async with _httpx.AsyncClient() as http:
+                    resp = await http.post(
+                        oidc_introspection_url,
+                        data={"token": jwt_token},
+                        auth=(oidc_client_id, oidc_client_secret),
+                        timeout=5.0,
+                    )
+                    return resp.json().get("active", False)
+            except Exception:
+                pass
         return False
 
     sse_plain = SseServerTransport("/messages/")
     sse_token = SseServerTransport("/t/{token}/messages/")
 
     async def handle_sse(request: Request):
-        if not _is_authorized(request):
+        if not await _is_authorized(request):
             return Response("Unauthorized", status_code=401)
         async with sse_plain.connect_sse(
             request.scope, request.receive, request._send
@@ -412,7 +432,7 @@ def _run_sse() -> None:
 
     async def handle_sse_with_token(request: Request):
         token = request.path_params.get("token", "")
-        if not _is_authorized(request, path_token=token):
+        if not await _is_authorized(request, path_token=token):
             return Response("Unauthorized", status_code=401)
         async with sse_token.connect_sse(
             request.scope, request.receive, request._send
