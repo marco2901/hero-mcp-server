@@ -23,7 +23,7 @@ services:
       - traefik.http.services.hero-mcp.loadbalancer.server.port=8000
       - traefik.http.routers.hero-mcp.tls.certresolver=mydnschallenge
       - traefik.http.routers.hero-mcp.tls=true
-      - traefik.http.routers.hero-mcp.middlewares=middlewares-rate-limit@file,middlewares-secure-headers@file
+      - traefik.http.routers.hero-mcp.middlewares=middlewares-rate-limit@file,middlewares-secure-headers@file,middlewares-authelia@file
     networks:
       - traefik
       - authelia

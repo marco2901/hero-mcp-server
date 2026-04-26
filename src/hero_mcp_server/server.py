@@ -1,11 +1,14 @@
 """HERO MCP Server – MCP-Tools für die HERO Handwerkersoftware."""
 
 import json
+import logging
 from typing import Any
 
 import mcp.server.stdio
 import mcp.types as types
 from mcp.server import Server
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 from .client import create_project_lead, graphql_query
 
@@ -398,25 +401,52 @@ def _run_sse() -> None:
     async def _is_authorized(request: Request, path_token: str | None = None) -> bool:
         if not mcp_api_key:
             return True
+
+        # 1. Token im Pfad (Claude.ai ohne OAuth)
         if path_token and path_token == mcp_api_key:
+            logging.info("Auth OK: Pfad-Token")
             return True
+
+        # 2. Statischer Bearer Token (Claude Desktop / API-Clients)
         auth = request.headers.get("Authorization", "")
         if auth == f"Bearer {mcp_api_key}":
+            logging.info("Auth OK: statischer Bearer Token")
             return True
-        # JWT via Authelia OIDC Introspection validieren
-        if auth.startswith("Bearer ") and oidc_introspection_url and oidc_client_id and oidc_client_secret:
+
+        # 3. Authelia hat den Request bereits validiert (middlewares-authelia@file in Traefik)
+        #    Authelia setzt nach erfolgreicher Validierung den Remote-User Header
+        remote_user = request.headers.get("Remote-User", "")
+        if remote_user:
+            logging.info("Auth OK: Authelia Remote-User=%s", remote_user)
+            return True
+
+        # 4. JWT direkt via Authelia OIDC Introspection (ohne Traefik-Middleware)
+        if auth.startswith("Bearer "):
             jwt_token = auth[7:]
-            try:
-                async with _httpx.AsyncClient() as http:
-                    resp = await http.post(
-                        oidc_introspection_url,
-                        data={"token": jwt_token},
-                        auth=(oidc_client_id, oidc_client_secret),
-                        timeout=5.0,
-                    )
-                    return resp.json().get("active", False)
-            except Exception:
-                pass
+            logging.info("JWT erhalten, versuche Introspection (erste 20 Zeichen: %s…)", jwt_token[:20])
+            if not oidc_introspection_url:
+                logging.warning("OIDC_INTROSPECTION_URL nicht gesetzt – JWT abgelehnt")
+            elif not oidc_client_id or not oidc_client_secret:
+                logging.warning("OIDC_CLIENT_ID oder OIDC_CLIENT_SECRET fehlt – JWT abgelehnt")
+            else:
+                logging.info("Introspection gegen %s (client_id=%s)", oidc_introspection_url, oidc_client_id)
+                try:
+                    async with _httpx.AsyncClient() as http:
+                        resp = await http.post(
+                            oidc_introspection_url,
+                            data={"token": jwt_token},
+                            auth=(oidc_client_id, oidc_client_secret),
+                            timeout=5.0,
+                        )
+                        body = resp.json()
+                        active = body.get("active", False)
+                        logging.info("Introspection: HTTP %s, active=%s", resp.status_code, active)
+                        return active
+                except Exception as e:
+                    logging.error("Introspection fehlgeschlagen: %s", e)
+
+        logging.warning("Auth ABGELEHNT – kein gültiger Token. Headers: %s",
+                        {k: v for k, v in request.headers.items() if k.lower() not in ("cookie",)})
         return False
 
     sse_plain = SseServerTransport("/messages/")
