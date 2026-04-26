@@ -367,7 +367,53 @@ async def _add_logbook_entry(args: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> None:
     import asyncio
-    asyncio.run(mcp.server.stdio.run_server(server))
+    import os
+    if os.getenv("MCP_TRANSPORT", "stdio") == "sse":
+        _run_sse()
+    else:
+        asyncio.run(mcp.server.stdio.run_server(server))
+
+
+def _run_sse() -> None:
+    import os
+    import uvicorn
+    from mcp.server.sse import SseServerTransport
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request
+    from starlette.responses import Response
+    from starlette.routing import Mount, Route
+
+    sse = SseServerTransport("/messages/")
+    mcp_api_key = os.getenv("MCP_API_KEY", "")
+
+    class BearerAuthMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            if mcp_api_key:
+                auth = request.headers.get("Authorization", "")
+                if auth != f"Bearer {mcp_api_key}":
+                    return Response("Unauthorized", status_code=401)
+            return await call_next(request)
+
+    async def handle_sse(request: Request):
+        async with sse.connect_sse(
+            request.scope, request.receive, request._send
+        ) as streams:
+            await server.run(
+                streams[0], streams[1], server.create_initialization_options()
+            )
+
+    app = Starlette(
+        routes=[
+            Route("/sse", endpoint=handle_sse),
+            Mount("/messages/", app=sse.handle_post_message),
+        ],
+        middleware=[Middleware(BearerAuthMiddleware)],
+    )
+
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
