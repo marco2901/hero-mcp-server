@@ -379,37 +379,53 @@ def _run_sse() -> None:
     import uvicorn
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
-    from starlette.middleware import Middleware
-    from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.requests import Request
     from starlette.responses import Response
     from starlette.routing import Mount, Route
 
-    sse = SseServerTransport("/messages/")
     mcp_api_key = os.getenv("MCP_API_KEY", "")
 
-    class BearerAuthMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request: Request, call_next):
-            if mcp_api_key:
-                auth = request.headers.get("Authorization", "")
-                if auth != f"Bearer {mcp_api_key}":
-                    return Response("Unauthorized", status_code=401)
-            return await call_next(request)
+    # Token im Pfad: /sse            → kein Token konfiguriert (lokal/test)
+    # Token im Pfad: /{token}/sse    → Claude.ai trägt die volle URL ein
+    # Bearer Header                  → Claude Desktop / API-Clients
+
+    def _is_authorized(request: Request, path_token: str | None = None) -> bool:
+        if not mcp_api_key:
+            return True
+        if path_token and path_token == mcp_api_key:
+            return True
+        auth = request.headers.get("Authorization", "")
+        if auth == f"Bearer {mcp_api_key}":
+            return True
+        return False
+
+    sse_plain = SseServerTransport("/messages/")
+    sse_token = SseServerTransport("/t/{token}/messages/")
 
     async def handle_sse(request: Request):
-        async with sse.connect_sse(
+        if not _is_authorized(request):
+            return Response("Unauthorized", status_code=401)
+        async with sse_plain.connect_sse(
             request.scope, request.receive, request._send
         ) as streams:
-            await server.run(
-                streams[0], streams[1], server.create_initialization_options()
-            )
+            await server.run(streams[0], streams[1], server.create_initialization_options())
+
+    async def handle_sse_with_token(request: Request):
+        token = request.path_params.get("token", "")
+        if not _is_authorized(request, path_token=token):
+            return Response("Unauthorized", status_code=401)
+        async with sse_token.connect_sse(
+            request.scope, request.receive, request._send
+        ) as streams:
+            await server.run(streams[0], streams[1], server.create_initialization_options())
 
     app = Starlette(
         routes=[
             Route("/sse", endpoint=handle_sse),
-            Mount("/messages/", app=sse.handle_post_message),
+            Mount("/messages/", app=sse_plain.handle_post_message),
+            Route("/t/{token}/sse", endpoint=handle_sse_with_token),
+            Mount("/t/{token}/messages/", app=sse_token.handle_post_message),
         ],
-        middleware=[Middleware(BearerAuthMiddleware)],
     )
 
     port = int(os.getenv("PORT", "8000"))
