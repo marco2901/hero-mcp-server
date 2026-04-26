@@ -107,11 +107,11 @@ async def list_tools() -> list[types.Tool]:
                     "first_name": {"type": "string"},
                     "last_name": {"type": "string"},
                     "company_name": {"type": "string"},
-                    "phone": {"type": "string"},
+                    "phone_home": {"type": "string", "description": "Festnetz"},
+                    "phone_mobile": {"type": "string", "description": "Mobilnummer"},
                     "street": {"type": "string"},
                     "city": {"type": "string"},
                     "zipcode": {"type": "string"},
-                    "country_code": {"type": "string", "default": "DE"},
                 },
                 "required": ["email"],
             },
@@ -224,20 +224,20 @@ async def _create_project(args: dict[str, Any]) -> dict[str, Any]:
 
 async def _get_contacts(args: dict[str, Any]) -> dict[str, Any]:
     query = """
-    query GetContacts($limit: Int, $offset: Int, $search: String) {
-      contacts(first: $limit, skip: $offset, search: $search) {
+    query GetContacts($limit: Int, $offset: Int) {
+      contacts(first: $limit, offset: $offset) {
         id
-        number
+        nr
         first_name
         last_name
         email
-        phone
+        phone_home
+        phone_mobile
         company_name
         address {
           street
           city
           zipcode
-          country_code
         }
       }
     }
@@ -246,19 +246,19 @@ async def _get_contacts(args: dict[str, Any]) -> dict[str, Any]:
         "limit": args.get("limit", 20),
         "offset": args.get("offset", 0),
     }
-    if args.get("search"):
-        variables["search"] = args["search"]
     return await graphql_query(query, variables)
 
 
 async def _get_projects(args: dict[str, Any]) -> dict[str, Any]:
     query = """
-    query GetProjects($limit: Int, $offset: Int, $search: String) {
-      project_matches(first: $limit, skip: $offset, search: $search) {
+    query GetProjects($limit: Int, $offset: Int) {
+      project_matches(first: $limit, offset: $offset) {
         id
-        number
-        measure
-        status_code
+        name
+        project_nr
+        display_id
+        measure { name }
+        current_project_match_status { name }
         contact {
           first_name
           last_name
@@ -277,22 +277,24 @@ async def _get_projects(args: dict[str, Any]) -> dict[str, Any]:
         "limit": args.get("limit", 20),
         "offset": args.get("offset", 0),
     }
-    if args.get("search"):
-        variables["search"] = args["search"]
     return await graphql_query(query, variables)
 
 
 async def _get_documents(args: dict[str, Any]) -> dict[str, Any]:
     query = """
     query GetDocuments($limit: Int, $offset: Int) {
-      customer_documents(first: $limit, skip: $offset) {
+      customer_documents(first: $limit, offset: $offset) {
         id
-        number
-        created_at
-        document_type
-        status
+        nr
+        date
+        created
+        type
+        document_type { name }
+        status_code
+        status_name
         value
         vat
+        currency
       }
     }
     """
@@ -306,7 +308,7 @@ async def _get_documents(args: dict[str, Any]) -> dict[str, Any]:
 async def _get_calendar_events(args: dict[str, Any]) -> dict[str, Any]:
     query = """
     query GetCalendarEvents($limit: Int, $offset: Int) {
-      calendar_events(first: $limit, skip: $offset) {
+      calendar_events(first: $limit, offset: $offset) {
         id
         title
         start_at
@@ -327,7 +329,7 @@ async def _create_contact(args: dict[str, Any]) -> dict[str, Any]:
     mutation CreateContact($input: ContactInput!) {
       create_contact(input: $input) {
         id
-        number
+        nr
         email
         first_name
         last_name
@@ -335,7 +337,7 @@ async def _create_contact(args: dict[str, Any]) -> dict[str, Any]:
     }
     """
     contact_input: dict[str, Any] = {"email": args["email"]}
-    for field in ("first_name", "last_name", "company_name", "phone"):
+    for field in ("first_name", "last_name", "company_name", "phone_home", "phone_mobile"):
         if args.get(field):
             contact_input[field] = args[field]
     if any(args.get(k) for k in ("street", "city", "zipcode")):
@@ -343,7 +345,6 @@ async def _create_contact(args: dict[str, Any]) -> dict[str, Any]:
             "street": args.get("street", ""),
             "city": args.get("city", ""),
             "zipcode": args.get("zipcode", ""),
-            "country_code": args.get("country_code", "DE"),
         }
     return await graphql_query(query, {"input": contact_input})
 
