@@ -10,6 +10,7 @@ services:
       - MCP_TRANSPORT=sse
       - MCP_API_KEY=${MCP_API_KEY}
       - PORT=8000
+      # Authelia läuft im traefik-Netzwerk → direkt erreichbar
       - OIDC_INTROSPECTION_URL=http://authelia:9091/api/oidc/introspection
       - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
       - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
@@ -25,11 +26,8 @@ services:
       - traefik.http.routers.hero-mcp.tls=true
       - traefik.http.routers.hero-mcp.middlewares=middlewares-rate-limit@file,middlewares-secure-headers@file,middlewares-authelia@file
     networks:
-      - traefik
-      - authelia
+      - traefik  # Authelia & Traefik sind beide in diesem Netzwerk
 
 networks:
   traefik:
-    external: true
-  authelia:
     external: true
