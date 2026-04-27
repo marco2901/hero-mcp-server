@@ -16,12 +16,22 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik
-      - traefik.http.routers.hero-mcp.rule=Host(`hero-mcp.your-domain.com`) && PathPrefix(`/sse`, `/messages`)
-      - traefik.http.routers.hero-mcp.entrypoints=websecure
-      - traefik.http.services.hero-mcp.loadbalancer.server.port=8000
-      - traefik.http.routers.hero-mcp.tls.certresolver=your-cert-resolver
-      - traefik.http.routers.hero-mcp.tls=true
-      - traefik.http.routers.hero-mcp.middlewares=middlewares-rate-limit@file,middlewares-secure-headers@file
+      # Router für /sse
+      - traefik.http.routers.hero-mcp-sse.rule=Host(`hero-mcp.your-domain.com`) && PathPrefix(`/sse`)
+      - traefik.http.routers.hero-mcp-sse.entrypoints=websecure
+      - traefik.http.routers.hero-mcp-sse.service=hero-mcp-svc
+      - traefik.http.routers.hero-mcp-sse.tls.certresolver=your-cert-resolver
+      - traefik.http.routers.hero-mcp-sse.tls=true
+      - traefik.http.routers.hero-mcp-sse.middlewares=middlewares-rate-limit@file,middlewares-secure-headers@file
+      # Router für /messages
+      - traefik.http.routers.hero-mcp-msg.rule=Host(`hero-mcp.your-domain.com`) && PathPrefix(`/messages`)
+      - traefik.http.routers.hero-mcp-msg.entrypoints=websecure
+      - traefik.http.routers.hero-mcp-msg.service=hero-mcp-svc
+      - traefik.http.routers.hero-mcp-msg.tls.certresolver=your-cert-resolver
+      - traefik.http.routers.hero-mcp-msg.tls=true
+      - traefik.http.routers.hero-mcp-msg.middlewares=middlewares-rate-limit@file,middlewares-secure-headers@file
+      # Service
+      - traefik.http.services.hero-mcp-svc.loadbalancer.server.port=8000
     networks:
       - traefik
 
