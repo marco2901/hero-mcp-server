@@ -1,8 +1,16 @@
 # Authelia OIDC-Konfiguration für den HERO MCP Server
 # Diesen Block in deine bestehende configuration.yml unter identity_providers.oidc.clients einfügen
 #
-# Den bcrypt-Hash des Client-Secrets erzeugen mit:
-#   docker run authelia/authelia:latest authelia crypto hash generate bcrypt --password 'dein_secret'
+# Authelia 4.39+ akzeptiert für OIDC-Client-Secrets nur noch pbkdf2 oder argon2id —
+# bcrypt ist deprecated und führt zu "client secret did not match"-Fehlern am
+# Token-Endpoint. Hash erzeugen mit:
+#
+#   docker run --rm authelia/authelia:latest \
+#     authelia crypto hash generate pbkdf2 --variant sha512 \
+#     --password 'dein_secret_klartext'
+#
+# Den 'Digest:' Wert (z.B. $pbkdf2-sha512$310000$...) als client_secret unten eintragen.
+# Der Klartext kommt in OIDC_CLIENT_SECRET im Stack.
 
 identity_providers:
   oidc:
@@ -35,7 +43,7 @@ identity_providers:
     clients:
       - client_id: claude-mcp
         client_name: Claude MCP
-        client_secret: '$2b$12$BCRYPT_HASH_OF_YOUR_SECRET_HERE'
+        client_secret: '$pbkdf2-sha512$310000$PBKDF2_HASH_OF_YOUR_SECRET_HERE'
         public: false
         authorization_policy: one_factor
         redirect_uris:
@@ -44,3 +52,4 @@ identity_providers:
         grant_types: [authorization_code, refresh_token]
         response_types: [code]
         token_endpoint_auth_method: client_secret_post
+        introspection_endpoint_auth_method: client_secret_basic

@@ -50,7 +50,7 @@ Den HERO API-Key erhältst du kostenlos beim HERO Support: [hero-software.de/api
 2. Benutzer authentifiziert sich bei Authelia
 3. Claude.ai erhält JWT Access Token
 4. Claude.ai sendet `Bearer {JWT}` an `/sse`
-5. hero-mcp-server validiert JWT via Authelia Token Introspection (`http://authelia:9091/api/oidc/introspection`)
+5. hero-mcp-server validiert JWT via Authelia Token Introspection (öffentliche HTTPS-URL, z.B. `https://authelia.your-domain.com/api/oidc/introspection`)
 
 ---
 
@@ -104,7 +104,7 @@ identity_providers:
     clients:
       - client_id: claude-mcp
         client_name: Claude MCP
-        client_secret: '$2b$12$BCRYPT_HASH_OF_YOUR_SECRET'  # bcrypt-Hash
+        client_secret: '$pbkdf2-sha512$310000$PBKDF2_HASH_OF_YOUR_SECRET'
         public: false
         authorization_policy: one_factor
         redirect_uris:
@@ -113,12 +113,19 @@ identity_providers:
         grant_types: [authorization_code, refresh_token]
         response_types: [code]
         token_endpoint_auth_method: client_secret_post
+        introspection_endpoint_auth_method: client_secret_basic
 ```
 
-> **bcrypt-Hash erzeugen:**
+> **Authelia 4.39+:** Client-Secrets müssen pbkdf2 oder argon2id sein —
+> bcrypt (`$2b$…`/`$2y$…`) führt zu *„client secret did not match"*-Fehlern
+> am Token-Endpoint. Hash erzeugen mit:
 > ```bash
-> docker run authelia/authelia:latest authelia crypto hash generate bcrypt --password 'dein_secret'
+> docker run --rm authelia/authelia:latest \
+>   authelia crypto hash generate pbkdf2 --variant sha512 \
+>   --password 'dein_secret_klartext'
 > ```
+> Den `Digest:`-Wert als `client_secret` eintragen, der Klartext kommt
+> in `OIDC_CLIENT_SECRET` im Stack.
 
 ### Schritt 2: Traefik Routing-Regeln (file-based)
 
@@ -205,9 +212,10 @@ services:
       - MCP_TRANSPORT=sse
       - MCP_API_KEY=optionaler_fallback_token       # nur für Claude Desktop im SSE-Modus
       - PORT=8000
-      - OIDC_INTROSPECTION_URL=http://authelia:9091/api/oidc/introspection
+      # Authelia 4.39+: externe HTTPS-URL nutzen (siehe Hinweis weiter unten)
+      - OIDC_INTROSPECTION_URL=https://authelia.your-domain.com/api/oidc/introspection
       - OIDC_CLIENT_ID=claude-mcp
-      - OIDC_CLIENT_SECRET=dein_secret_klartext     # Klartext (nicht der bcrypt-Hash!)
+      - OIDC_CLIENT_SECRET=dein_secret_klartext     # Klartext (nicht der pbkdf2-Hash!)
     expose:
       - "8000"
     labels:
@@ -237,9 +245,16 @@ networks:
     external: true
 ```
 
-> **Wichtig:** `OIDC_CLIENT_SECRET` = **Klartext** des Secrets. Den bcrypt-Hash braucht nur Authelia.
+> **Wichtig:** `OIDC_CLIENT_SECRET` = **Klartext** des Secrets. Den pbkdf2-Hash braucht nur Authelia.
 
 > **Kein `middlewares-authelia@file`!** Authelias ForwardAuth-Middleware ist für Browser-Sessions (Cookies). Claude.ai sendet Bearer-JWTs – diese werden direkt im Server via Token Introspection validiert.
+
+> **Authelia 4.39+ — Introspection muss über HTTPS:** Authelia validiert den
+> `X-Forwarded-Proto`-Header gegen den Token-Issuer. Ein direkter Call zu
+> `http://authelia:9091/api/oidc/introspection` aus dem internen Docker-Netz
+> wird mit *„invalid X-Forwarded-Proto header value 'http'"* abgelehnt. Daher
+> die externe HTTPS-URL nutzen — der Call läuft dann durch Traefik, der den
+> Header korrekt setzt.
 
 ### Schritt 4: claude.ai Connector einrichten
 
@@ -262,8 +277,8 @@ Claude.ai führt den OAuth-Flow automatisch durch – Authelia zeigt eine Login-
 |----------|---------|
 | HTTPS/TLS | Traefik + Let's Encrypt |
 | OAuth2 / OIDC | Authelia als Issuer, JWT Access Tokens |
-| Token Introspection | Jeder Token wird live gegen Authelia validiert |
-| bcrypt Client Secret | Authelia speichert nur den Hash, nie den Klartext |
+| Token Introspection | Jeder Token wird live gegen Authelia validiert (`client_secret_basic`) |
+| pbkdf2 Client Secret | Authelia speichert nur den Hash, nie den Klartext (Authelia 4.39+, bcrypt deprecated) |
 | Rate Limiting | Traefik-Middleware |
 | Secure Headers | HSTS, X-Frame-Options etc. via Traefik |
 | HERO API Key | Nur in Container-Umgebung, nie im Image oder Repo |

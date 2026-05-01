@@ -8,7 +8,11 @@ services:
       - MCP_TRANSPORT=sse
       - MCP_API_KEY=optionaler_fallback_token
       - PORT=8000
-      - OIDC_INTROSPECTION_URL=http://authelia:9091/api/oidc/introspection
+      # Use the EXTERNAL HTTPS URL of your Authelia instance — Authelia 4.39+
+      # validates the X-Forwarded-Proto/host against the token issuer and
+      # rejects introspection from internal `http://authelia:9091` with a
+      # `invalid X-Forwarded-Proto header value 'http'` error.
+      - OIDC_INTROSPECTION_URL=https://authelia.your-domain.com/api/oidc/introspection
       - OIDC_CLIENT_ID=claude-mcp
       - OIDC_CLIENT_SECRET=dein_secret_klartext
       - LOG_LEVEL=INFO     # DEBUG für detaillierte Auth-Logs, INFO für normal
