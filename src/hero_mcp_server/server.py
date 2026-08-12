@@ -396,6 +396,19 @@ def _run_sse() -> None:
     oidc_client_id = os.getenv("OIDC_CLIENT_ID", "")
     oidc_client_secret = os.getenv("OIDC_CLIENT_SECRET", "")
 
+    # OAuth-Discovery für Claude.ai (MCP Authorization Spec / RFC 9728).
+    # Der moderne Claude-Client sucht via /.well-known/oauth-protected-resource
+    # den zuständigen Authorization Server (Authelia). Ohne diese Metadata
+    # startet er den OIDC-Flow gar nicht und verbindet ohne Token -> 401.
+    #   OIDC_ISSUER          z.B. https://authelia.biegel24.de
+    #   MCP_RESOURCE_URL     kanonische URL dieses MCP-Servers (öffentlich)
+    oidc_issuer = os.getenv("OIDC_ISSUER", "")
+    if not oidc_issuer and oidc_introspection_url:
+        # aus der Introspection-URL ableiten (…/api/oidc/introspection abschneiden)
+        oidc_issuer = oidc_introspection_url.split("/api/oidc/")[0]
+    resource_url = os.getenv("MCP_RESOURCE_URL", "https://hero-mcp.biegel24.de")
+    prm_url = resource_url.rstrip("/") + "/.well-known/oauth-protected-resource"
+
     # Auth-Reihenfolge:
     # 1. Bearer {MCP_API_KEY}  → Claude Desktop / direkte API-Clients
     # 2. Bearer {JWT}          → Claude.ai via Authelia OIDC (Token Introspection)
@@ -439,21 +452,53 @@ def _run_sse() -> None:
         logging.warning("Auth ABGELEHNT für %s %s", request.method, request.url.path)
         return False
 
+    def _unauthorized() -> Response:
+        # WWW-Authenticate verweist Clients gemäß RFC 9728 auf die Metadata,
+        # damit sie den Authorization Server (Authelia) finden.
+        headers = {"WWW-Authenticate": f'Bearer resource_metadata="{prm_url}"'}
+        return Response("Unauthorized", status_code=401, headers=headers)
+
     sse = SseServerTransport("/messages/")
 
     async def handle_sse(request: Request):
         logging.debug("SSE-Verbindung eingehend von %s", request.client)
         if not await _is_authorized(request):
             logging.warning("SSE abgewiesen – nicht autorisiert")
-            return Response("Unauthorized", status_code=401)
+            return _unauthorized()
         logging.info("SSE-Verbindung akzeptiert")
         async with sse.connect_sse(
             request.scope, request.receive, request._send
         ) as streams:
             await server.run(streams[0], streams[1], server.create_initialization_options())
 
+    from starlette.responses import JSONResponse, RedirectResponse
+
+    async def protected_resource_metadata(request: Request):
+        # RFC 9728 – OAuth 2.0 Protected Resource Metadata
+        return JSONResponse(
+            {
+                "resource": resource_url.rstrip("/"),
+                "authorization_servers": [oidc_issuer] if oidc_issuer else [],
+                "scopes_supported": ["openid", "profile", "groups", "offline_access"],
+                "bearer_methods_supported": ["header"],
+            }
+        )
+
+    async def authorization_server_metadata(request: Request):
+        # Manche Clients fragen den AS-Metadata-Endpoint zuerst am Resource-Host
+        # ab – auf Authelias eigene Discovery weiterleiten.
+        if oidc_issuer:
+            return RedirectResponse(
+                oidc_issuer.rstrip("/") + "/.well-known/oauth-authorization-server"
+            )
+        return Response("Not Found", status_code=404)
+
     app = Starlette(
         routes=[
+            Route("/.well-known/oauth-protected-resource", endpoint=protected_resource_metadata),
+            Route("/.well-known/oauth-protected-resource/sse", endpoint=protected_resource_metadata),
+            Route("/.well-known/oauth-authorization-server", endpoint=authorization_server_metadata),
+            Route("/.well-known/openid-configuration", endpoint=authorization_server_metadata),
             Route("/sse", endpoint=handle_sse),
             Mount("/messages/", app=sse.handle_post_message),
         ],
