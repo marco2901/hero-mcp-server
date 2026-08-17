@@ -120,14 +120,56 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="hero_add_logbook_entry",
-            description="Fügt einen Protokoll-Eintrag zu einem HERO-Projekt hinzu.",
+            description=(
+                "Schreibt einen Protokoll-Eintrag ins Logbuch eines HERO-Projekts. "
+                "Der Eintrag erscheint in der Projekt-Timeline als Kommentar und ist "
+                "nachträglich NICHT per API löschbar."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "project_id": {"type": "string", "description": "ID des Projekts"},
-                    "message": {"type": "string", "description": "Protokoll-Text"},
+                    "project_match_id": {
+                        "type": "integer",
+                        "description": "ID des Projekts (project_match.id, z.B. aus hero_get_projects)",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Eintragstext. Zeilenumbrüche (\\n) sind erlaubt.",
+                    },
+                    "type_code": {
+                        "type": "integer",
+                        "description": "HERO-Eintragstyp. 9210 = Kommentar (Default).",
+                        "default": 9210,
+                    },
+                    "role_visibility": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional: Eintrag nur für diese Rollen sichtbar.",
+                    },
                 },
-                "required": ["project_id", "message"],
+                "required": ["project_match_id", "text"],
+            },
+        ),
+        types.Tool(
+            name="hero_get_logbook_entries",
+            description=(
+                "Liest die Logbuch-Einträge eines HERO-Projekts (älteste zuerst). "
+                "Standardmäßig ohne automatische System-Einträge."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_match_id": {"type": "integer", "description": "ID des Projekts"},
+                    "limit": {"type": "integer", "default": 20},
+                    "offset": {"type": "integer", "default": 0},
+                    "include_system": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Auch System-Einträge (Statuswechsel, Mailversand) mitliefern.",
+                    },
+                    "search": {"type": "string", "description": "Volltext-Filter über die Einträge"},
+                },
+                "required": ["project_match_id"],
             },
         ),
         types.Tool(
@@ -179,6 +221,8 @@ async def _dispatch(name: str, args: dict[str, Any]) -> Any:
         return await _create_contact(args)
     if name == "hero_add_logbook_entry":
         return await _add_logbook_entry(args)
+    if name == "hero_get_logbook_entries":
+        return await _get_logbook_entries(args)
     if name == "hero_graphql":
         return await graphql_query(args["query"], args.get("variables"))
     raise ValueError(f"Unbekanntes Tool: {name}")
@@ -353,17 +397,66 @@ async def _create_contact(args: dict[str, Any]) -> dict[str, Any]:
 
 async def _add_logbook_entry(args: dict[str, Any]) -> dict[str, Any]:
     query = """
-    mutation AddLogbookEntry($project_id: ID!, $message: String!) {
-      add_logbook_entry(project_id: $project_id, message: $message) {
+    mutation AddLogbookEntry($input: LogbookEntryInput!) {
+      add_logbook_entry(logbook_entry: $input) {
         id
-        created_at
-        message
+        created
+        type_code
+        custom_title
+        custom_text
+      }
+    }
+    """
+    # project_id/message = Altnamen der ersten Tool-Fassung, weiter akzeptiert
+    target_id = args.get("project_match_id") or args.get("project_id")
+    text = args.get("text") or args.get("message")
+    if not target_id:
+        raise ValueError("project_match_id fehlt")
+    if not text:
+        raise ValueError("text fehlt")
+
+    entry: dict[str, Any] = {
+        "target": "project_match",
+        "target_id": int(target_id),
+        "custom_text": text,
+        "type_code": int(args.get("type_code", 9210)),
+    }
+    if args.get("role_visibility"):
+        entry["role_visibility"] = args["role_visibility"]
+    return await graphql_query(query, {"input": entry})
+
+
+async def _get_logbook_entries(args: dict[str, Any]) -> dict[str, Any]:
+    query = """
+    query Logbook(
+      $project_match_id: Int
+      $first: Int
+      $offset: Int
+      $show_system: Boolean
+      $search: String
+    ) {
+      project_histories(
+        project_match_id: $project_match_id
+        first: $first
+        offset: $offset
+        show_system_histories: $show_system
+        search_term: $search
+      ) {
+        id
+        created
+        type_code
+        custom_title
+        custom_text
+        author_name
       }
     }
     """
     return await graphql_query(query, {
-        "project_id": args["project_id"],
-        "message": args["message"],
+        "project_match_id": int(args["project_match_id"]),
+        "first": int(args.get("limit", 20)),
+        "offset": int(args.get("offset", 0)),
+        "show_system": bool(args.get("include_system", False)),
+        "search": args.get("search"),
     })
 
 

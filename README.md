@@ -13,6 +13,7 @@ MCP-Server (Model Context Protocol) für die [HERO Handwerkersoftware](https://h
 | `hero_get_calendar_events` | Kalendertermine abrufen |
 | `hero_create_contact` | Neuen Kontakt erstellen |
 | `hero_add_logbook_entry` | Protokolleintrag zu Projekt hinzufügen |
+| `hero_get_logbook_entries` | Logbuch eines Projekts lesen |
 | `hero_graphql` | Direkte GraphQL-Abfrage (Experten-Tool) |
 
 ## API-Key beantragen
