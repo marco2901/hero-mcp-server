@@ -270,8 +270,8 @@ async def _create_project(args: dict[str, Any]) -> dict[str, Any]:
 
 async def _get_contacts(args: dict[str, Any]) -> dict[str, Any]:
     query = """
-    query GetContacts($limit: Int, $offset: Int) {
-      contacts(first: $limit, offset: $offset) {
+    query GetContacts($limit: Int, $offset: Int, $search: String) {
+      contacts(first: $limit, offset: $offset, search: $search) {
         id
         nr
         first_name
@@ -291,14 +291,15 @@ async def _get_contacts(args: dict[str, Any]) -> dict[str, Any]:
     variables = {
         "limit": args.get("limit", 20),
         "offset": args.get("offset", 0),
+        "search": args.get("search"),
     }
     return await graphql_query(query, variables)
 
 
 async def _get_projects(args: dict[str, Any]) -> dict[str, Any]:
     query = """
-    query GetProjects($limit: Int, $offset: Int) {
-      project_matches(first: $limit, offset: $offset) {
+    query GetProjects($limit: Int, $offset: Int, $search: String) {
+      project_matches(first: $limit, offset: $offset, search: $search) {
         id
         name
         project_nr
@@ -322,6 +323,7 @@ async def _get_projects(args: dict[str, Any]) -> dict[str, Any]:
     variables = {
         "limit": args.get("limit", 20),
         "offset": args.get("offset", 0),
+        "search": args.get("search"),
     }
     return await graphql_query(query, variables)
 
