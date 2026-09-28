@@ -193,6 +193,7 @@ async def list_tools() -> list[types.Tool]:
             description=(
                 "Legt einen Ausgabenbeleg (Eingangsrechnung) mit PDF in HERO an: Datei laden "
                 "(sourceUrl oder fileBase64), per REST zu HERO hochladen, Receipt_CreateReceipt. "
+                "Paperless-Einmal-Links (10 Min.) direkt als sourceUrl übergeben. "
                 "Duplikatschutz über Belegnummer + Lieferant + Bruttobetrag: existiert der Beleg "
                 "schon, wird nur die Datei angehängt (sofern er noch keine hat). Der Beleg entsteht "
                 "als Entwurf; Freigabe in HERO. Gibt Beleg-ID und Link zurück."
@@ -210,19 +211,26 @@ async def list_tools() -> list[types.Tool]:
                     "serviceDate": {"type": "string", "description": "Leistungsdatum YYYY-MM-DD"},
                     "dueDate": {"type": "string", "description": "Fälligkeit YYYY-MM-DD"},
                     "number": {"type": "string", "description": "Rechnungsnummer des Lieferanten"},
+                    "supplier": {
+                        "type": ["string", "integer"],
+                        "description": "Lieferant: Firmenname (wird gesucht/angelegt) oder HERO-Kontakt-ID",
+                    },
+                    "net": {"type": "number", "description": "Netto-Summe"},
+                    "vat": {"type": "number", "description": "USt-Summe"},
+                    "gross": {"type": "number", "description": "Brutto-Summe"},
                     "customerId": {"type": "integer", "description": "HERO-Kontakt-ID des Lieferanten"},
                     "supplierName": {
                         "type": "string",
-                        "description": "Alternativ zu customerId: Firmenname des Lieferanten (wird gesucht)",
+                        "description": "Alias für supplier (Firmenname)",
                     },
                     "createSupplier": {
                         "type": "boolean",
                         "default": True,
                         "description": "Lieferant als Kontakt (Kategorie supplier) anlegen, falls nicht gefunden",
                     },
-                    "totalNet": {"type": "number", "description": "Netto-Summe"},
-                    "totalVat": {"type": "number", "description": "USt-Summe"},
-                    "totalGross": {"type": "number", "description": "Brutto-Summe"},
+                    "totalNet": {"type": "number", "description": "Alias für net"},
+                    "totalVat": {"type": "number", "description": "Alias für vat"},
+                    "totalGross": {"type": "number", "description": "Alias für gross"},
                     "vatRate": {
                         "type": "number",
                         "description": "USt-Satz in % (Default: aus Netto/USt abgeleitet, 0 bei Reverse Charge)",

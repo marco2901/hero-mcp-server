@@ -282,7 +282,26 @@ async def _update_file(receipt_id: int, file_upload_uuid: str) -> dict[str, Any]
     return data["Receipt_UpdateReceipt"]
 
 
+# Kurznamen (z. B. aus Paperless-Workflows) → interne Parameternamen
+_ALIASES = {"net": "totalNet", "vat": "totalVat", "gross": "totalGross"}
+
+
+def _normalize(args: dict[str, Any]) -> dict[str, Any]:
+    args = dict(args)
+    for short, full in _ALIASES.items():
+        if args.get(full) is None and args.get(short) is not None:
+            args[full] = args[short]
+    supplier = args.get("supplier")
+    if supplier not in (None, "") and not (args.get("customerId") or args.get("supplierName")):
+        if isinstance(supplier, int) or str(supplier).strip().isdigit():
+            args["customerId"] = int(supplier)
+        else:
+            args["supplierName"] = str(supplier).strip()
+    return args
+
+
 async def create_receipt(args: dict[str, Any]) -> dict[str, Any]:
+    args = _normalize(args)
     number = str(args.get("number") or "").strip()
     if not number:
         raise ValueError("number (Belegnummer) ist Pflicht – sie dient dem Duplikatschutz")
