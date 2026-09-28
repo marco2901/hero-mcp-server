@@ -14,6 +14,8 @@ MCP-Server (Model Context Protocol) für die [HERO Handwerkersoftware](https://h
 | `hero_create_contact` | Neuen Kontakt erstellen |
 | `hero_add_logbook_entry` | Protokolleintrag zu Projekt hinzufügen |
 | `hero_get_logbook_entries` | Logbuch eines Projekts lesen |
+| `hero_create_receipt` | Ausgabenbeleg mit PDF anlegen (Upload + Duplikatschutz) |
+| `hero_attach_receipt_file` | Datei an bestehenden Beleg anhängen/ersetzen |
 | `hero_graphql` | Direkte GraphQL-Abfrage (Experten-Tool) |
 
 ## API-Key beantragen
@@ -302,7 +304,8 @@ hero-mcp-server/
 │   └── hero_mcp_server/
 │       ├── __init__.py
 │       ├── server.py        # MCP-Server, Tools, SSE-Transport & OIDC-Auth
-│       └── client.py        # HERO API Client (REST Lead API + GraphQL)
+│       ├── receipts.py      # Ausgabenbelege: Datei laden, Upload, Dedup
+│       └── client.py        # HERO API Client (REST Lead API, REST-Upload, GraphQL)
 ├── examples/
 │   ├── traefik-hero-mcp-oauth.yml   # Traefik file-based routing rules
 │   └── authelia-oidc-client.yml     # Authelia OIDC-Client Konfiguration
@@ -315,6 +318,29 @@ hero-mcp-server/
 ├── docker-compose.yml
 └── pyproject.toml
 ```
+
+## Ausgabenbelege (`hero_create_receipt`)
+
+`Receipt_CreateReceipt` akzeptiert eine PDF nur als `fileUploadUuid`. Die UUID
+entsteht über den (undokumentierten) REST-Upload
+`POST https://login.hero-software.de/app/v8/FileUploads/upload`
+(multipart, Feld `file`, Bearer = `HERO_API_KEY`). Der Upload muss **temporär**
+bleiben (keine `section` mitschicken) – sonst lehnt die Receipt-Mutation mit
+„Upload is not temporary" ab; beim Verknüpfen verschiebt HERO die Datei selbst
+in die Section `receipt`.
+
+Ablauf: Datei laden (`sourceUrl` oder `fileBase64` + `filename`, nur PDF/Bilder,
+max. 25 MB) → Duplikatsuche (Belegnummer + Lieferant + Brutto) → Upload →
+`Receipt_CreateReceipt`. Existiert der Beleg schon, wird nur die Datei per
+`Receipt_UpdateReceipt` angehängt (falls noch keine dran ist; `replaceFile=true`
+ersetzt). Lieferant per `customerId` oder `supplierName` (wird gesucht und bei
+Bedarf als Kontakt der Kategorie `supplier` angelegt). Ohne `positions` entsteht
+eine Sammelposition (Brutto, USt-Satz aus Netto/USt abgeleitet). Belege entstehen
+als Entwurf (Status 50) – Freigabe/Buchungskonto in HERO.
+
+| ENV | Default | Zweck |
+|-----|---------|-------|
+| `HERO_RECEIPT_URL_TEMPLATE` | `https://login.hero-software.de/Receipts/edit/{id}` | UI-Link in der Tool-Antwort |
 
 ## API-Referenz
 

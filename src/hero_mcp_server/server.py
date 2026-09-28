@@ -13,6 +13,7 @@ _log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, _log_level, logging.INFO), format="%(asctime)s [%(levelname)s] %(message)s")
 
 from .client import create_project_lead, graphql_query
+from .receipts import attach_receipt_file, create_receipt
 
 server = Server("hero-mcp-server")
 
@@ -173,6 +174,92 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="hero_create_receipt",
+            description=(
+                "Legt einen Ausgabenbeleg (Eingangsrechnung) mit PDF in HERO an: Datei laden "
+                "(sourceUrl oder fileBase64), per REST zu HERO hochladen, Receipt_CreateReceipt. "
+                "Duplikatschutz über Belegnummer + Lieferant + Bruttobetrag: existiert der Beleg "
+                "schon, wird nur die Datei angehängt (sofern er noch keine hat). Der Beleg entsteht "
+                "als Entwurf; Freigabe in HERO. Gibt Beleg-ID und Link zurück."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sourceUrl": {
+                        "type": "string",
+                        "description": "Download-Link zur Datei (PDF/Bild), z. B. Einmal-Link aus paperless_file_link",
+                    },
+                    "fileBase64": {"type": "string", "description": "Alternativ: Dateiinhalt Base64-kodiert"},
+                    "filename": {"type": "string", "description": "Dateiname (Pflicht bei fileBase64)"},
+                    "receiptDate": {"type": "string", "description": "Belegdatum YYYY-MM-DD"},
+                    "serviceDate": {"type": "string", "description": "Leistungsdatum YYYY-MM-DD"},
+                    "dueDate": {"type": "string", "description": "Fälligkeit YYYY-MM-DD"},
+                    "number": {"type": "string", "description": "Rechnungsnummer des Lieferanten"},
+                    "customerId": {"type": "integer", "description": "HERO-Kontakt-ID des Lieferanten"},
+                    "supplierName": {
+                        "type": "string",
+                        "description": "Alternativ zu customerId: Firmenname des Lieferanten (wird gesucht)",
+                    },
+                    "createSupplier": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Lieferant als Kontakt (Kategorie supplier) anlegen, falls nicht gefunden",
+                    },
+                    "totalNet": {"type": "number", "description": "Netto-Summe"},
+                    "totalVat": {"type": "number", "description": "USt-Summe"},
+                    "totalGross": {"type": "number", "description": "Brutto-Summe"},
+                    "vatRate": {
+                        "type": "number",
+                        "description": "USt-Satz in % (Default: aus Netto/USt abgeleitet, 0 bei Reverse Charge)",
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["INVOICE", "CREDIT_NOTE", "CASH_RECEIPT"],
+                        "default": "INVOICE",
+                    },
+                    "isReverseCharge": {"type": "boolean", "default": False},
+                    "supplierVatNumber": {"type": "string", "description": "USt-IdNr. des Lieferanten"},
+                    "externalCustomerNumber": {"type": "string", "description": "Eigene Kundennummer beim Lieferanten"},
+                    "currency": {"type": "string", "default": "EUR"},
+                    "description": {"type": "string", "description": "Text der Belegposition"},
+                    "bookAccountId": {"type": "integer", "description": "Buchungskonto der Position (HERO bookaccounts.id)"},
+                    "projectMatchId": {"type": "integer", "description": "Projekt, dem die Kosten zugeordnet werden"},
+                    "costCenterId": {"type": "integer", "description": "Kostenstelle"},
+                    "positions": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Optional: eigene Positionen (Receipt_CreateReceiptPositionInput) statt einer Sammelposition",
+                    },
+                    "replaceFile": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Bei Duplikat die vorhandene Datei ersetzen",
+                    },
+                },
+                "required": ["receiptDate", "number"],
+            },
+        ),
+        types.Tool(
+            name="hero_attach_receipt_file",
+            description=(
+                "Hängt einem bestehenden HERO-Beleg nachträglich eine Datei (PDF/Bild) an bzw. "
+                "ersetzt die vorhandene. Quelle: sourceUrl oder fileBase64 + filename."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "receiptId": {"type": "integer", "description": "ID des Belegs (Receipt_Receipts)"},
+                    "sourceUrl": {
+                        "type": "string",
+                        "description": "Download-Link zur Datei (PDF/Bild), z. B. Einmal-Link aus paperless_file_link",
+                    },
+                    "fileBase64": {"type": "string", "description": "Alternativ: Dateiinhalt Base64-kodiert"},
+                    "filename": {"type": "string", "description": "Dateiname (Pflicht bei fileBase64)"},
+                },
+                "required": ["receiptId"],
+            },
+        ),
+        types.Tool(
             name="hero_graphql",
             description=(
                 "Führt eine beliebige GraphQL-Abfrage direkt gegen die HERO API aus. "
@@ -223,6 +310,10 @@ async def _dispatch(name: str, args: dict[str, Any]) -> Any:
         return await _add_logbook_entry(args)
     if name == "hero_get_logbook_entries":
         return await _get_logbook_entries(args)
+    if name == "hero_create_receipt":
+        return await create_receipt(args)
+    if name == "hero_attach_receipt_file":
+        return await attach_receipt_file(args)
     if name == "hero_graphql":
         return await graphql_query(args["query"], args.get("variables"))
     raise ValueError(f"Unbekanntes Tool: {name}")
