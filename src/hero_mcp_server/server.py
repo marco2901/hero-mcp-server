@@ -115,6 +115,21 @@ async def list_tools() -> list[types.Tool]:
                     "street": {"type": "string"},
                     "city": {"type": "string"},
                     "zipcode": {"type": "string"},
+                    "category": {
+                        "type": "string",
+                        "enum": ["customer", "supplier", "partner", "contact"],
+                        "description": "Kontaktkategorie (Default: customer)",
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": ["private", "commercial"],
+                        "description": "Privat- oder Gewerbekunde (Default: HERO-Standard)",
+                    },
+                    "find_existing": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Vorhandenen passenden Kontakt zurückgeben statt Dublette anzulegen",
+                    },
                 },
                 "required": ["email"],
             },
@@ -465,18 +480,23 @@ async def _get_calendar_events(args: dict[str, Any]) -> dict[str, Any]:
 
 async def _create_contact(args: dict[str, Any]) -> dict[str, Any]:
     query = """
-    mutation CreateContact($input: ContactInput!) {
-      create_contact(input: $input) {
+    mutation CreateContact($findExisting: Boolean, $contact: CustomerInput) {
+      create_contact(findExisting: $findExisting, contact: $contact) {
         id
         nr
         email
         first_name
         last_name
+        company_name
+        category
+        type
       }
     }
     """
     contact_input: dict[str, Any] = {"email": args["email"]}
-    for field in ("first_name", "last_name", "company_name", "phone_home", "phone_mobile"):
+    for field in (
+        "first_name", "last_name", "company_name", "phone_home", "phone_mobile", "category", "type",
+    ):
         if args.get(field):
             contact_input[field] = args[field]
     if any(args.get(k) for k in ("street", "city", "zipcode")):
@@ -485,7 +505,8 @@ async def _create_contact(args: dict[str, Any]) -> dict[str, Any]:
             "city": args.get("city", ""),
             "zipcode": args.get("zipcode", ""),
         }
-    return await graphql_query(query, {"input": contact_input})
+    variables = {"findExisting": args.get("find_existing", True), "contact": contact_input}
+    return await graphql_query(query, variables)
 
 
 async def _add_logbook_entry(args: dict[str, Any]) -> dict[str, Any]:
